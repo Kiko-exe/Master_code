@@ -172,7 +172,67 @@ ggsave("Figure3_SWC_vs_GHG.png", p_panel, width = 12, height = 4.2, dpi = 300, b
 
 ```
 
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(sf)
 
+dms_to_dd_one <- function(x) {
+  if (is.na(x) || !nzchar(x)) return(NA_real_)
+  x <- str_replace_all(x, "[\u2032']", "’")
+  x <- str_replace_all(x, "[\u2033\"]", "”")
+  x <- str_squish(x)
+  m <- regexec("([0-9]+)\\D+([0-9]+)\\D+([0-9]+)\\D*([NSEW])", x)
+  parts <- regmatches(x, m)[[1]]
+  if (length(parts) == 0) return(NA_real_)
+  deg <- as.numeric(parts[2])
+  min <- as.numeric(parts[3])
+  sec <- as.numeric(parts[4])
+  dir <- parts[5]
+  dd <- deg + min/60 + sec/3600
+  if (dir %in% c("S","W")) dd <- -dd
+  dd
+}
+dms_to_dd <- function(v) vapply(v, dms_to_dd_one, numeric(1))
+
+path <- "ENVSCI 708_Data_Collaborative Research Project.xlsx"
+raw <- read_excel(path)
+colname <- if ("GPS location" %in% names(raw)) "GPS location" else names(raw)[1]
+
+df <- raw %>%
+  mutate(loc = as.character(.data[[colname]])) %>%
+  mutate(loc = str_replace_all(loc, "[()]", "")) %>%
+  separate(loc, into = c("part1","part2","rest"), sep = ",", extra = "merge", fill = "right") %>%
+  mutate(part1 = str_squish(part1),
+         part2 = str_squish(part2)) %>%
+  mutate(
+    lat = ifelse(str_detect(part1, "°"), dms_to_dd(part1), suppressWarnings(as.numeric(part1))),
+    lon = ifelse(str_detect(part2, "°"), dms_to_dd(part2), suppressWarnings(as.numeric(part2)))
+  ) %>%
+  select(lat, lon) %>%
+  filter(!is.na(lat) & !is.na(lon))
+
+points_sf <- st_as_sf(df, coords = c("lon","lat"), crs = 4326)
+
+p <- ggplot() +
+  geom_sf(data = points_sf, size = 2) +
+  coord_sf(expand = FALSE) +
+  theme_minimal() +
+  labs(title = "GPS Points", x = "Longitude", y = "Latitude")
+
+print(p)
+ggsave("gps_points.png", p, width = 7, height = 6, dpi = 300)
+
+write.csv(st_drop_geometry(points_sf) |>
+            mutate(lon = st_coordinates(points_sf)[,1],
+                   lat = st_coordinates(points_sf)[,2]),
+          "gps_points_clean.csv", row.names = FALSE)
+
+st_write(points_sf, "gps_points.geojson", delete_dsn = TRUE)
+```
 
 
 
